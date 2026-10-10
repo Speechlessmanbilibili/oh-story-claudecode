@@ -34,16 +34,14 @@ generic 只往项目里放 `skills/` 和 `AGENTS.md`，没有运行时拦截、�
    dsh plugin --profile <profile> add "$DSH_HOME/oh-story/plugin"
    ```
    装不动时（例如离线、pnpm 不可用）退回按绝对路径挂载：`cordis.patch.yml` 里 `name` 写 `file:///<绝对路径>/index.js`。**Windows 上必须用 `file://` URL，裸的 `C:/…` 会让 ESM 加载器报 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。**
-4. **写配置。** 在 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 里合并一条 insert（已有同 id 条目就只替换 config）：
+4. **写配置。** 插件包自带 bundle patch，装进 profile 之后会以默认配置自己挂上；这一步只是把 `hooksDir` 指到你铺好的那处。在 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 里按 **id 定向覆盖**合并，**不要 insert**（同一个 `oh-story` id insert 两次会撞，插件就挂不上）：
    ```yaml
-   - insert:
-       - id: oh-story
-         name: dsh-oh-story
-         config:
-           hooksDir: '<$DSH_HOME 的绝对路径，用正斜杠>/oh-story/hooks'
-           rosterDir: '.oh-story/agents'
+   - id: oh-story
+     config:
+       hooksDir: '<$DSH_HOME 的绝对路径，用正斜杠>/oh-story/hooks'
+       rosterDir: '.oh-story/agents'
    ```
-   `hooksDir` 必须指向第 2 步铺好的 hooks 目录，插件加载时会检查 `story_hook_core.js` 在不在，不在就直接报错。
+   这两项都有默认值（`$DSH_HOME/oh-story/hooks` 与 `.oh-story/agents`），所以即使这层补丁没生效，插件也会落在正确目录上。
 5. **铺项目。** 在写作项目根：
    - 合并 `references/dsh/AGENTS.md.tmpl` 到 `<项目>/AGENTS.md`；
    - 复制 7 个角色剧本到 `<项目>/.oh-story/agents/`；
@@ -60,14 +58,15 @@ generic 只往项目里放 `skills/` 和 `AGENTS.md`，没有运行时拦截、�
 - `<项目>/AGENTS.md` 含 dsh story skill routing sections。
 - 插件自检（不需要起 Harness，可直接跑）：
   ```bash
-  cd $DSH_HOME/oh-story/plugin && node --test test/
+  cd $DSH_HOME/oh-story/plugin && node --test test/index.test.mjs
   ```
-  8 条断言覆盖“非写作项目完全静默”“缺细纲拦下”“追踪状态缺失拦下”“齐了放行”“写后回灌”“会话开始注入”，全绿才算铺对。
+  10 条断言覆盖「非写作项目完全静默」「缺细纲拦下」「追踪状态缺失拦下」「齐了放行」「写后回灌」「会话开始注入」「默认 hooksDir」「核缺失时不注册且落失败状态」「核装好时注册六个时机且落 ok 状态」，全绿才算铺对。
+- **重启后确认插件真的起来了**：读 `$DSH_HOME/oh-story/plugin-status.json`。文件在且 `ok: true` 才算装载成功；`ok: false` 会带 `stage`（`normalizeConfig` 配置解析 / `load-core` 共享核加载）与 `error`。第一次真拦下写入时该文件会被更新一次，带 `guardHits` 与拦截原因，用来区分「起来了」和「在干活」。
 - **生效条件**：插件与 profile 依赖是启动期读的，装完要**重启 DSH**；只改 `cordis.patch.yml` 的话由 profile 的 patch 热重载接管。
 
 ## 安装报告必须提示
 
-- 装完要**重启 DeepSeek Harness**，不然插件不加载。
+- 装完要**重启 DeepSeek Harness**，不然插件不加载。重启后读 `$DSH_HOME/oh-story/plugin-status.json` 确认 `ok: true`。
 - 插件挂在 profile 上，**该 profile 的所有会话都会加载它**；非写作项目自动静默，但作者要知道它不是按项目加载的。
 - 压缩前后在 Harness 里不是一对真事件，插件是从会话事件流里嗅探 `compaction/*` 再在下一步重注，属于兜底。
 - 7 个角色不是 Harness 原生的自定义 agent，是剧本 + `subagent` 工具分工；`story-review` 的多视角审查按 solo/direct 执行。
