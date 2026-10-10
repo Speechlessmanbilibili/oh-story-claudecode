@@ -97,6 +97,8 @@ jobs:
         run: python3 scripts/test-author-memory-commit.py
       - name: Check story-setup deployment
         run: bash scripts/check-story-setup-deployment.sh
+      - name: DeepSeek Harness native plugin regression
+        run: node --test skills/story-setup/references/dsh/plugin/test/index.test.mjs
       - name: Plugin packaging regression
         run: python3 scripts/test-plugin-packaging.py
       - name: Check Claude Code adapter
@@ -210,6 +212,9 @@ jobs:
       - name: Test Codex hook adapter
         shell: bash
         run: bash scripts/test-codex-hooks.sh
+      - name: DeepSeek Harness native plugin regression
+        shell: bash
+        run: node --test skills/story-setup/references/dsh/plugin/test/index.test.mjs
       - name: Test ZCode hook adapter
         shell: bash
         run: bash scripts/test-zcode-hooks.sh
@@ -300,6 +305,8 @@ jobs:
         run: bash scripts/check-codex-adapter.sh
       - name: Test Codex hook adapter
         run: bash scripts/test-codex-hooks.sh
+      - name: DeepSeek Harness native plugin regression
+        run: node --test skills/story-setup/references/dsh/plugin/test/index.test.mjs
       - name: Test ZCode hook adapter
         run: bash scripts/test-zcode-hooks.sh
       - name: Test Antigravity hook adapter

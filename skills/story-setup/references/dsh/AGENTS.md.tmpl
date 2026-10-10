@@ -1,0 +1,85 @@
+# {项目名} — 网文写作工具集（DeepSeek Harness）
+
+本项目按 DeepSeek Harness（dsh）原生方式接入 oh-story skills：skills 走 Harness 的技能发现目录，运行时钩子由 `dsh-oh-story` 插件挂在 Harness 原生的工具拦截点上，7 个专业角色以剧本文件随项目部署、用 `subagent` 工具分工。
+
+## Skill 路由表
+
+优先用自然语言点名 skill；Harness 的技能目录里已经列出这些名字，直接说书名和动作即可。
+
+| 意图 | Skill | 说明 |
+|------|-------|------|
+| 写长篇 / 开书 / 续写 | story-long-write | 长篇网文写作（逐章推进） |
+| 写短篇 | story-short-write | 短篇网文写作（情绪驱动） |
+| 长篇拆文 | story-long-analyze | 长篇小说深度拆解 |
+| 短篇拆文 | story-short-analyze | 短篇小说拆文分析 |
+| 长篇扫榜 | story-long-scan | 长篇小说榜单与市场趋势 |
+| 短篇扫榜 | story-short-scan | 短篇小说榜单与情绪风口 |
+| 去 AI 味 | story-deslop | 去除 AI 写作痕迹 |
+| 封面 | story-cover | 生成封面图 |
+| 审查 | story-review | 多视角审查；无 custom agents 时降级为单线程审查 |
+| 导入 | story-import | 逆向导入已有小说到项目结构 |
+| 网文工具箱 | story | 模糊意图自动分发 |
+| 准备写书 / 部署 | story-setup | 通用项目结构与 skill 使用入口 |
+| 浏览器登录态 / 抓取 | browser-cdp | 浏览器 CDP 工具 |
+
+## 文件结构
+
+- `skills/` 或 `.dsh/skills/` — 项目本地 skills；Agent 应先读对应 `SKILL.md`，再按需读取 `references/`
+- `.oh-story/agents/` — 7 个角色剧本（story-architect、narrative-writer、consistency-checker、story-explorer、story-researcher、character-designer、chapter-extractor）
+- `.oh-story/rules/` — 大纲、叙事、一致性、格式四份规则
+- `拆文库/` — 拆文分析结果存放目录
+- `{书名}/正文/` — 长篇小说正文章节
+- `{书名}/正文.md` — 短篇小说正文
+- `{书名}/设定/` — 角色设定、世界设定
+- `{书名}/大纲/` — 卷纲、细纲
+- `{书名}/追踪/` — `_tracking-state.json` 唯一结构化权威、固定 7 栏 `上下文.md` 续写状态卡、逐章紧凑记录、核心角色独立派生快照、伏笔当前视图、作者与读者双时间线；全部通过追踪工具生成
+- `{书名}/对标/` — 对标作品分析
+
+## 运行时拦截（dsh-oh-story 插件）
+
+本项目装了 `dsh-oh-story`，它把下面这些时机接到了 Harness 原生的拦截点上，不需要 Agent 自觉：
+
+- 会话开始：注入当前书目、`追踪/上下文.md` 续写状态卡、连续性提醒、角色名册。
+- 写正文前：缺细纲、细纲为空、追踪检查点不成立（state 缺失、schema 不是 4、状态卡修订不一致、上一章事务未提交）→ 直接拒绝这次写入，原因会回给模型。
+- `git commit` 前：暂存区 markdown 校验不通过 → 拒绝。
+- 写完正文后：自动跑写后网（AI 句式、截断、落盘字节数）→ 结论回灌给模型。
+- 回合收尾：还有连续性欠账 → 让这一轮继续。
+- 压缩后：把续写状态卡重新补回上下文。
+
+插件只在带 `.story-deployed` 标记的项目里生效；其它目录完全静默。
+
+## 多角色分工
+
+Harness 没有“按名字 spawn 的自定义 agent”注册表，所以 7 个角色是剧本文件。需要分工时用 `subagent` 工具，把对应剧本全文放在 prompt 开头：
+
+- 拆章、定人设 → `story-architect`、`character-designer`
+- 写正文、去 AI 味 → `narrative-writer`
+- 查事实与伏笔 → `consistency-checker`
+- 查设定、查资料 → `story-explorer`、`story-researcher`
+- 抽章节摘要 → `chapter-extractor`
+
+并行 spawn 时每个子 agent 只领一个角色，产出回主会话统一落盘。
+
+## 通用使用约定
+
+- 写正文前先有大纲：长篇需要 `大纲/细纲_第N章*.md`，短篇需要 `小节大纲.md`。
+- 有插件的平台也会拦，但拦截只是最后一道闸：Agent 仍应在写作流程里自行检查大纲、上下文和追踪文件。
+- 遇到 skill 要求调用 story-architect、narrative-writer 等 agent 时，按上节用 `subagent` 落地；无法 spawn 时由当前 Agent 直接完成，并在结果里说明降级。
+- **去 AI 味自锁**：每章正文落盘后，同一轮内立即按写作 skill 的检测器和禁用词表自检并清零；写下一章前先复查上一章无欠账。唯一豁免＝用户显式说“本章不去味”，豁免章在标题行下加 `<!-- 去味:跳过 -->`。
+- Compact / 新会话后优先读取 `{书名}/追踪/上下文.md` 恢复当前写作状态。
+
+## 与作者协作
+
+- 回复和报告用写书的话说（书、章、大纲、设定），不向作者抛脚本名、字段名或状态名；只有报错时才附原始报错。skill 里标着 `<!-- author-report -->` 的模板块只是格式参考，回复时直接输出其中的文字，不带代码块围栏。
+- 作者要求记住、忘掉或确认一条写作习惯/偏好时（如“记住：这本书对话用直角引号”），走 story skill 的“作者记忆”，由它的脚本写入 `.story/作者记忆/`；不要存进 Harness 自带的记忆。一次性要求直接照做，不记录。
+- 不修改项目里已安装的 skill 文件（`SKILL.md`、`references/`、`scripts/`；story-setup 重新部署时覆盖除外）。skill 脚本报错时停下，把报错和所执行的命令告诉作者，不自行修补绕过。
+
+## Compact 后恢复上下文
+
+写作中的关键上下文：
+1. 当前写作项目名称和进度
+2. 最近讨论的角色设定变更
+3. 未完成的伏笔列表
+4. 当前章节的情绪/节奏目标
+
+`dsh-oh-story` 会在检测到压缩后自动重注 `{书名}/追踪/上下文.md`；若插件未生效，手动读该文件恢复。

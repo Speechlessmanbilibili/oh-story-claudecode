@@ -2,7 +2,7 @@
 
 [English](hosts_EN.md)
 
-Oh Story 支持 8 款编程 Agent。本页是各 Agent 的部署细节、已知限制和安装排查；
+Oh Story 支持 9 款编程 Agent。本页是各 Agent 的部署细节、已知限制和安装排查；
 日常使用只需 README 的[安装](../README.md#安装)一节。
 
 ## 安装排查：Windows 报错、环境检查、marketplace 路径
@@ -49,6 +49,19 @@ repo 内直接使用：Codex 会扫描 `$REPO_ROOT/.agents/skills`（指向 `ski
 ## Reasonix
 
 当前支持 skills + 原生 plugin manifest：Reasonix 原生扫描项目 skill root（`.agents/skills` 等，指向 `skills/` 的 symlink）发现 13 个 skill，用 `reasonix doctor capabilities` 校验；也可用根 `reasonix-plugin.json` 走 `reasonix plugin install`。`story-setup` 选择 `target_cli=reasonix` 时会把 skills 复制到项目 `skills/` 并写入 Reasonix 版 `AGENTS.md`；hooks/custom agents 暂不部署，涉及专业 Agent 的 skill 走 solo/direct fallback。Windows 未启用 symlink 时改走原生 plugin。
+
+## DeepSeek Harness
+
+DeepSeek Harness（桌面版 / `dsh` 命令行）走原生接入，不是通用文件模式：运行时拦截由本仓库的 `dsh-oh-story` 插件挂在 Harness 原生的拦截点上，7 个角色以剧本文件随项目部署、用 `subagent` 工具分工。
+
+- **不是兼容桥。** Harness 自带 `@deepseek-ai/dsh-hooks-claude-code` 与 `@deepseek-ai/dsh-hooks-codex`，但它们只支持 SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop / SubagentStart / SubagentStop，**不支持 PreCompact、PostCompact、SessionEnd**，而且一个进程只认一份配置。`dsh-oh-story` 不走这条路。
+- **插件干什么。** 会话开始注入当前书目、`追踪/上下文.md` 续写状态卡、连续性提醒和角色名册；写正文前缺细纲、细纲为空、追踪检查点不成立就拒绝这次写入；`git commit` 前校验暂存区 markdown；写完正文自动跑写后网并把结论回灌；回合收尾还有连续性欠账就续一轮；压缩后重注状态卡。
+- **只在写作项目里生效。** 插件挂在 profile 上会随该 profile 的所有会话加载，但每个时机都先向上找 `.story-deployed` 标记（或含 `追踪/`、`.active-book` 的目录），找不到就完全静默。
+- **skills 放项目级。** Harness 的技能发现优先级是 `<项目>/.dsh/skills` > `<项目>/.agents/skills` > 自定义目录 > `<DSH_HOME>/skills` > `~/.agents/skills`。放项目级只有该项目看得见；若之前用 `npx skills add … -g` 装过用户级副本，建议撤掉，否则所有会话的技能目录都会列出这 13 个名字。
+- **装完要重启 Harness。** 插件与 profile 依赖是启动期读的；只改 profile 的 `cordis.patch.yml` 时由 patch 热重载接管。
+- **多 agent 是剧本 + subagent。** Harness 没有“按名字 spawn 的自定义 agent”注册表，7 个角色写在 `<项目>/.oh-story/agents/`，需要分工时用 `subagent` 工具带上对应剧本 spawn；`story-review` 的多视角审查按 solo/direct 执行。
+
+细节与排查见 `skills/story-setup/references/deploy-dsh.md`；插件说明见 `skills/story-setup/references/dsh/plugin/README.md`。
 
 ## Web AI / 通用 Agent
 

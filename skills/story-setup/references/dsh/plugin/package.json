@@ -1,0 +1,33 @@
+{
+  "name": "dsh-oh-story",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness native host adapter for oh-story-claudecode: outline guard before prose, post-write prose checks, continuity context injection, and the story role roster.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "oh-story",
+    "web-novel",
+    "writing"
+  ],
+  "license": "MIT",
+  "engines": { "node": ">=22.19.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1-rc.1 <5"
+  }
+}

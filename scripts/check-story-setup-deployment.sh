@@ -11,13 +11,14 @@ HOOKS_DIR="$SKILL_DIR/references/templates/hooks"
 AGENT_REFS_DIR="$SKILL_DIR/references/agent-references"
 SKILL_FILE="$SKILL_DIR/SKILL.md"
 # 入口只留通用流程；各宿主专属部署清单/算法/验证在 references/deploy-<target_cli>.md，入口按宿主只读一份。
-DEPLOY_HOSTS="claude-code opencode codex antigravity zcode openclaw reasonix generic"
+DEPLOY_HOSTS="claude-code opencode codex antigravity zcode openclaw reasonix dsh generic"
 deploy_file() { printf '%s/references/deploy-%s.md' "$SKILL_DIR" "$1"; }
 DEPLOY_CLAUDE="$(deploy_file claude-code)"
 DEPLOY_OPENCODE="$(deploy_file opencode)"
 DEPLOY_ZCODE="$(deploy_file zcode)"
 DEPLOY_OPENCLAW="$(deploy_file openclaw)"
 DEPLOY_REASONIX="$(deploy_file reasonix)"
+DEPLOY_DSH="$(deploy_file dsh)"
 DEPLOY_GENERIC="$(deploy_file generic)"
 SETTINGS_FILE="$SKILL_DIR/references/templates/settings-hooks.json"
 CLAUDE_MERGE="$SKILL_DIR/scripts/merge-claude-settings.py"
@@ -208,7 +209,7 @@ for host in $DEPLOY_HOSTS; do
   done
 done
 extra_deploy_files="$(find "$SKILL_DIR/references" -maxdepth 1 -name 'deploy-*.md' | wc -l | tr -d ' ')"
-[ "$extra_deploy_files" = "8" ] || fail "story-setup must ship exactly 8 host deploy files, found $extra_deploy_files"
+[ "$extra_deploy_files" = "9" ] || fail "story-setup must ship exactly 9 host deploy files, found $extra_deploy_files"
 # 能从运行环境判断宿主就不问作者；问也用白话，不再追问部署位置。
 assert_grep '能判断就不问作者' "$SKILL_FILE" "story-setup must detect the current host before asking the author"
 assert_no_grep '让用户选择目标环境' "$SKILL_FILE" "story-setup must not ask first-time authors to pick among all hosts when the host is detectable"
@@ -244,6 +245,22 @@ assert_grep 'references/openclaw/AGENTS\.md\.tmpl' "$DEPLOY_OPENCLAW" "deploymen
 assert_grep 'OpenClaw skills-only' "$DEPLOY_OPENCLAW" "story-setup must document OpenClaw skills-only deployment"
 assert_grep 'references/generic/AGENTS\.md\.tmpl' "$DEPLOY_GENERIC" "deployment manifest missing generic AGENTS template"
 assert_grep '通用 Web AI / 其他 Agent' "$DEPLOY_GENERIC" "story-setup must document generic Web AI deployment"
+# DeepSeek Harness 走原生插件，不是通用文件模式：插件、hooks 目录与多 agent 边界都要在部署文件里写死。
+assert_file "$SKILL_DIR/references/dsh/AGENTS.md.tmpl"
+assert_file "$SKILL_DIR/references/dsh/plugin/index.js"
+assert_file "$SKILL_DIR/references/dsh/plugin/package.json"
+assert_file "$SKILL_DIR/references/dsh/plugin/cordis.patch.yml"
+assert_grep 'references/dsh/AGENTS\.md\.tmpl' "$DEPLOY_DSH" "deployment manifest missing DeepSeek Harness AGENTS template"
+assert_grep 'references/dsh/plugin/' "$DEPLOY_DSH" "deployment manifest missing the dsh-oh-story plugin"
+assert_grep 'target_cli = dsh|`dsh`' "$SKILL_FILE" "story-setup must detect DeepSeek Harness projects"
+assert_grep 'dsh plugin --profile' "$DEPLOY_DSH" "deploy-dsh.md must document installing the plugin into a profile"
+assert_grep 'ERR_UNSUPPORTED_ESM_URL_SCHEME' "$DEPLOY_DSH" "deploy-dsh.md must warn that Windows absolute paths need file:// URLs"
+assert_grep 'tools/pre-execute' "$DEPLOY_DSH" "deploy-dsh.md must name the harness interception point the guard uses"
+assert_grep 'session/event' "$DEPLOY_DSH" "deploy-dsh.md must document how compaction is handled without a real PreCompact pair"
+assert_grep '不用兼容桥' "$DEPLOY_DSH" "deploy-dsh.md must state DeepSeek Harness does not route through the dialect bridges"
+for other in openclaw reasonix generic zcode opencode codex; do
+  assert_no_grep "references/$other/AGENTS\.md\.tmpl" "$DEPLOY_DSH" "deploy-dsh.md must not deploy the $other AGENTS template"
+done
 assert_grep 'references/reasonix/AGENTS\.md\.tmpl' "$DEPLOY_REASONIX" "deployment manifest missing Reasonix AGENTS template"
 assert_grep 'Reasonix skills-only' "$DEPLOY_REASONIX" "story-setup must document Reasonix skills-only deployment"
 assert_grep '\.agents/skills → \.\./skills' "$DEPLOY_REASONIX" "Reasonix deploy must link .agents/skills to skills/"
