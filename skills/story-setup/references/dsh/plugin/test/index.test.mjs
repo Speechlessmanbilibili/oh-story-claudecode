@@ -273,19 +273,19 @@ test('写作项目：写完正文后回灌写后检查结论', async () => {
   }
 })
 
-test('拦截文案：人话在前，共享核原文在后', () => {
+test('拦截文案：书面语说明在前，共享核原文在后', () => {
   const raw = '⛔ 写正文被拦截：测试书 的追踪/_tracking-state.json 缺失；已有正文项目走 /story-import 的「旧追踪项目迁移」重建追踪（不必重跑全书拆解），新书先用 tracking_commit.py init 初始化。'
   const text = authorFacingBlock(raw, 'D:/proj/测试书/正文/第001章.md', 'write')
   const [head, ...rest] = text.split('\n')
   assert.ok(!/_tracking-state\.json|tracking_commit\.py/.test(head), '第一行不该出现脚本名或字段名')
-  assert.match(head, /追踪状态还没建立/, '第一行应当是人话')
+  assert.match(head, /尚未建立追踪状态/, '第一行应当是书面语说明')
   assert.match(head, /第001章\.md/, '应当点名被拦的文件')
   assert.match(rest.join('\n'), /_tracking-state\.json/, '原文要留在后面，别丢信息')
 })
 
 test('拦截文案：认不出的形态按类别兜底，不吞原文', () => {
   const text = authorFacingBlock('某种没见过的失败', '', 'commit')
-  assert.match(text.split('\n')[0], /这次提交被拦下了/)
+  assert.match(text.split('\n')[0], /本次提交已被拦截/)
   assert.match(text, /某种没见过的失败/)
   assert.equal(authorFacingBlock('', '', 'write'), '')
 })

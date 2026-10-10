@@ -252,7 +252,7 @@ function buildContext(core, config, root) {
       }
       if (card) {
         if (card.length > config.contextMaxChars) {
-          card = `${card.slice(0, config.contextMaxChars)}\n…（已截断，完整内容读 追踪/上下文.md）`
+          card = `${card.slice(0, config.contextMaxChars)}\n……（内容过长已截断，完整内容见 追踪/上下文.md）`
         }
         parts.push(`续写状态卡（追踪/上下文.md）：\n${card}`)
       }
@@ -295,50 +295,50 @@ function buildRoster(config, root) {
   if (entries.length === 0) return ''
   const lines = entries.map((file) => `- ${file.replace(/\.md$/, '')} → ${path.join(dir, file)}`)
   return [
-    '写作角色名册（需要分工时用 subagent 工具 spawn，并在 prompt 开头带上该角色剧本全文）：',
+    '写作角色名册（需要分工时，用 subagent 工具启动对应角色，并在 prompt 开头附上该角色剧本全文）：',
     ...lines,
   ].join('\n')
 }
 
 /**
- * 把共享核给的拦截原文翻成给作者看的话。
+ * 把共享核给的拦截原文翻成书面语说明。
  *
  * 共享核是各端共用的判定层，它的文案面向实现：带 `_tracking-state.json`、
  * `tracking_commit.py`、`schema_version` 这类脚本名和字段名。作者不该读到这些，
- * 但模型需要原文里的路径与补救步骤，所以做法是「人话在前，原文在后」，
+ * 但模型需要原文里的路径与补救步骤，所以做法是「说明在前，原文在后」，
  * 不丢信息也不把工程话摆到第一眼。
  *
- * 认不出形态时按类别给一句兜底，原文照旧附在后面——不猜、不吞。
+ * 认不出形态时按类别给一句兜底，原文照旧附在后面，不猜、不吞。
  *
  * @param {string} raw - 共享核返回的拦截原文。
  * @param {string} target - 被拦的目标文件（可空）。
  * @param {'write'|'commit'} kind - 拦截类型，决定兜底用词。
- * @returns {string} 给作者看的拦截说明。
+ * @returns {string} 拦截说明。
  */
 export function authorFacingBlock(raw, target = '', kind = 'write') {
   const text = String(raw || '').trim()
   if (!text) return ''
   const name = target ? path.basename(target) : ''
   const rules = [
-    { test: /缺少细纲/, say: '这一章还没有细纲，先把它补上再写正文。' },
-    { test: /细纲.*(是空的|不到)/, say: '这一章的细纲几乎是空的，先把这章写什么、主角做什么选择写清楚。' },
-    { test: /_tracking-state\.json 缺失/, say: '这本书的追踪状态还没建立。新书先走一遍开书流程把追踪建起来；已经有正文的老书走导入流程重建，别手工补。' },
-    { test: /无法解析/, say: '追踪状态文件读不出来，走导入流程重建，不要猜也不要手补。' },
-    { test: /schema_version|schema 不是/, say: '追踪状态是旧格式，走导入流程重建，不保留旧结构。' },
-    { test: /状态修订/, say: '续写状态卡和追踪状态对不上，重新提交这一章的追踪事务让派生视图整份重建，别分别手改状态卡和伏笔。' },
-    { test: /追踪已提交到第|先提交第/, say: '上一章的追踪事务还没提交，先把上一章提交完再写这一章。' },
-    { test: /未清毒句式欠账/, say: '上一章还有没清干净的 AI 句式欠账，先清零再写这一章。作者明确说过这章不用去味的话，在上一章标题行下标注一下再重试。' },
+    { test: /缺少细纲/, say: '本章尚无细纲。请先补建本章细纲，再开始写正文。' },
+    { test: /细纲.*(是空的|不到)/, say: '本章细纲内容不足。请先写清本章发生什么、主角做了什么选择，再开始写正文。' },
+    { test: /_tracking-state\.json 缺失/, say: '本书尚未建立追踪状态。新书请先完成开书流程以初始化追踪；已有正文的作品请通过导入流程重建，不要手工补写。' },
+    { test: /无法解析/, say: '追踪状态文件无法解析。请通过导入流程重建，不要猜测或手工补写。' },
+    { test: /schema_version|schema 不是/, say: '追踪状态为旧版结构。请通过导入流程重建，不保留旧结构。' },
+    { test: /状态修订/, say: '续写状态卡与追踪状态不一致。请为本章重新提交追踪事务，由工具整份重建派生视图，不要分别手工修改状态卡与伏笔。' },
+    { test: /追踪已提交到第|先提交第/, say: '上一章的追踪事务尚未提交。请先完成上一章提交，再开始写本章。' },
+    { test: /未清毒句式欠账/, say: '上一章仍有未清理的 AI 句式欠账。请先清零，再开始写本章；若作者明确本章无需去味，请在上一章标题行下标注后再重试。' },
   ]
   const hit = rules.find((rule) => rule.test.test(text))
   const head = hit
     ? hit.say
-    : (kind === 'commit' ? '这次提交被拦下了。' : '这次写入被拦下了。')
+    : (kind === 'commit' ? '本次提交已被拦截。' : '本次写入已被拦截。')
   const where = name ? `（${name}）` : ''
   return `${head}${where}\n原始提示：${text}`
 }
 
 /**
- * 把写后网的原始输出收拾成给作者看的样子。
+ * 把写后网的原始输出整理成书面语说明。
  *
  * 共享核的输出带一层说明性横幅（`=== 正文兜底检测（路径）===` 与
  * 「轻量确定性网自动复扫……」），对作者是噪音；真正有用的是后面的逐条命中。
@@ -577,7 +577,7 @@ export function apply(ctx, rawConfig) {
     if (!Array.isArray(findings) || findings.length === 0) return
 
     steered.add(key)
-    const text = `本轮收尾前还有连续性欠账：\n${findings.map((item) => `- ${String(item)}`).join('\n')}`
+    const text = `本轮结束前仍有连续性欠账：\n${findings.map((item) => `- ${String(item)}`).join('\n')}`
     try {
       agent.steer?.(makeMessage('turn-stop', text))
     } catch (error) {
