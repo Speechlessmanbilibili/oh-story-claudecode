@@ -11,7 +11,7 @@ import { tmpdir, homedir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { apply, dshHome, normalizeConfig, walkToRoot, writeStatus } from '../index.js'
+import { apply, authorFacingBlock, authorFacingPostWrite, dshHome, normalizeConfig, walkToRoot, writeStatus } from '../index.js'
 
 const HOOKS_DIR = path.resolve(import.meta.dirname, '../../../templates/hooks')
 
@@ -271,4 +271,29 @@ test('写作项目：写完正文后回灌写后检查结论', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('拦截文案：人话在前，共享核原文在后', () => {
+  const raw = '⛔ 写正文被拦截：测试书 的追踪/_tracking-state.json 缺失；已有正文项目走 /story-import 的「旧追踪项目迁移」重建追踪（不必重跑全书拆解），新书先用 tracking_commit.py init 初始化。'
+  const text = authorFacingBlock(raw, 'D:/proj/测试书/正文/第001章.md', 'write')
+  const [head, ...rest] = text.split('\n')
+  assert.ok(!/_tracking-state\.json|tracking_commit\.py/.test(head), '第一行不该出现脚本名或字段名')
+  assert.match(head, /追踪状态还没建立/, '第一行应当是人话')
+  assert.match(head, /第001章\.md/, '应当点名被拦的文件')
+  assert.match(rest.join('\n'), /_tracking-state\.json/, '原文要留在后面，别丢信息')
+})
+
+test('拦截文案：认不出的形态按类别兜底，不吞原文', () => {
+  const text = authorFacingBlock('某种没见过的失败', '', 'commit')
+  assert.match(text.split('\n')[0], /这次提交被拦下了/)
+  assert.match(text, /某种没见过的失败/)
+  assert.equal(authorFacingBlock('', '', 'write'), '')
+})
+
+test('写后检查文案：摘掉横幅，命中行原样保留', () => {
+  const raw = '=== 正文兜底检测（测试书/正文/第001章.md）===\n轻量确定性网自动复扫（模型无关，防主会话漏跑收尾）。按类型处理后复扫到净：\n第3行 工程词泄漏：「细纲」'
+  const text = authorFacingPostWrite(raw, 'D:/proj/测试书/正文/第001章.md')
+  assert.ok(!text.includes('==='), '不该留横幅')
+  assert.ok(!text.includes('轻量确定性网'), '不该留说明性旁白')
+  assert.match(text, /第3行 工程词泄漏：「细纲」/, '命中行要原样保留')
 })

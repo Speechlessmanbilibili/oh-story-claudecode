@@ -301,11 +301,67 @@ function buildRoster(config, root) {
 }
 
 /**
+ * 把共享核给的拦截原文翻成给作者看的话。
+ *
+ * 共享核是各端共用的判定层，它的文案面向实现：带 `_tracking-state.json`、
+ * `tracking_commit.py`、`schema_version` 这类脚本名和字段名。作者不该读到这些，
+ * 但模型需要原文里的路径与补救步骤，所以做法是「人话在前，原文在后」，
+ * 不丢信息也不把工程话摆到第一眼。
+ *
+ * 认不出形态时按类别给一句兜底，原文照旧附在后面——不猜、不吞。
+ *
+ * @param {string} raw - 共享核返回的拦截原文。
+ * @param {string} target - 被拦的目标文件（可空）。
+ * @param {'write'|'commit'} kind - 拦截类型，决定兜底用词。
+ * @returns {string} 给作者看的拦截说明。
+ */
+export function authorFacingBlock(raw, target = '', kind = 'write') {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  const name = target ? path.basename(target) : ''
+  const rules = [
+    { test: /缺少细纲/, say: '这一章还没有细纲，先把它补上再写正文。' },
+    { test: /细纲.*(是空的|不到)/, say: '这一章的细纲几乎是空的，先把这章写什么、主角做什么选择写清楚。' },
+    { test: /_tracking-state\.json 缺失/, say: '这本书的追踪状态还没建立。新书先走一遍开书流程把追踪建起来；已经有正文的老书走导入流程重建，别手工补。' },
+    { test: /无法解析/, say: '追踪状态文件读不出来，走导入流程重建，不要猜也不要手补。' },
+    { test: /schema_version|schema 不是/, say: '追踪状态是旧格式，走导入流程重建，不保留旧结构。' },
+    { test: /状态修订/, say: '续写状态卡和追踪状态对不上，重新提交这一章的追踪事务让派生视图整份重建，别分别手改状态卡和伏笔。' },
+    { test: /追踪已提交到第|先提交第/, say: '上一章的追踪事务还没提交，先把上一章提交完再写这一章。' },
+    { test: /未清毒句式欠账/, say: '上一章还有没清干净的 AI 句式欠账，先清零再写这一章。作者明确说过这章不用去味的话，在上一章标题行下标注一下再重试。' },
+  ]
+  const hit = rules.find((rule) => rule.test.test(text))
+  const head = hit
+    ? hit.say
+    : (kind === 'commit' ? '这次提交被拦下了。' : '这次写入被拦下了。')
+  const where = name ? `（${name}）` : ''
+  return `${head}${where}\n原始提示：${text}`
+}
+
+/**
+ * 把写后网的原始输出收拾成给作者看的样子。
+ *
+ * 共享核的输出带一层说明性横幅（`=== 正文兜底检测（路径）===` 与
+ * 「轻量确定性网自动复扫……」），对作者是噪音；真正有用的是后面的逐条命中。
+ * 这里只摘横幅，命中行原样保留——改写命中就等于改判定。
+ *
+ * @param {string} findings - 共享核 proseAfterWrite 的输出。
+ * @param {string} target - 目标文件。
+ * @returns {string} 写后检查说明。
+ */
+export function authorFacingPostWrite(findings, target) {
+  const kept = String(findings || '')
+    .split('\n')
+    .filter((line) => line.trim() && !line.startsWith('===') && !line.includes('轻量确定性网自动复扫'))
+  if (kept.length === 0) return ''
+  return `写后检查（${path.basename(target)}）：\n${kept.join('\n')}`
+}
+
+/**
  * 判定本次工具调用是否要被拦截。
  * @param {object} core - 共享核。
  * @param {object} exec - Harness 的工具执行记录。
  * @param {string} root - 写作项目根。
- * @returns {string} 拦截原因；不该拦时返回空串。
+ * @returns {{ reason: string, target: string, kind: 'write'|'commit' }|null} 拦截信息；不该拦时返回 null。
  */
 function guardReason(core, exec, root) {
   const tool = String(exec.name || '').toLowerCase()
@@ -313,37 +369,41 @@ function guardReason(core, exec, root) {
 
   if (WRITE_TOOLS.has(tool)) {
     const target = firstString(args, FILE_ARG_KEYS)
-    if (!target) return ''
+    if (!target) return null
     const abs = absoluteTarget(root, target)
     try {
-      return core.proseBlockReason(root, abs) || ''
+      const reason = core.proseBlockReason(root, abs) || ''
+      return reason ? { reason, target: abs, kind: 'write' } : null
     } catch {
-      return ''
+      return null
     }
   }
 
   if (SHELL_TOOLS.has(tool)) {
     const command = firstString(args, COMMAND_ARG_KEYS, true)
-    if (!command) return ''
+    if (!command) return null
     try {
       if (core.isGitCommitCommand(command)) {
         const warnings = core.stagedMarkdownWarnings(root)
-        if (Array.isArray(warnings) && warnings.length > 0) return warnings.join('\n')
-        return ''
+        if (Array.isArray(warnings) && warnings.length > 0) {
+          return { reason: warnings.join('\n'), target: '', kind: 'commit' }
+        }
+        return null
       }
       const targets = core.extractProseTargets(command)
       if (Array.isArray(targets)) {
         for (const target of targets) {
-          const reason = core.proseBlockReason(root, absoluteTarget(root, String(target)))
-          if (reason) return reason
+          const abs = absoluteTarget(root, String(target))
+          const reason = core.proseBlockReason(root, abs) || ''
+          if (reason) return { reason, target: abs, kind: 'write' }
         }
       }
     } catch {
-      return ''
+      return null
     }
   }
 
-  return ''
+  return null
 }
 
 /**
@@ -451,18 +511,18 @@ export function apply(ctx, rawConfig) {
   ctx.on('tools/pre-execute', async (exec, next) => {
     const root = await rootFor(exec.agent, exec.signal)
     if (!root) return next()
-    const reason = guardReason(core, exec, root)
-    if (reason) {
+    const blocked = guardReason(core, exec, root)
+    if (blocked) {
       // 第一次真拦下来时写一次状态，便于在外部确认插件不只是「起来了」而是「在干活」。
       guardHits += 1
       if (!firstGuardRecorded) {
         firstGuardRecorded = true
         writeStatus({
           ok: true, hooksDir: config.hooksDir, guardHits,
-          note: 'first guard hit', tool: String(exec.name || ''), reason,
+          note: 'first guard hit', tool: String(exec.name || ''), reason: blocked.reason,
         })
       }
-      return { kind: 'deny', reason }
+      return { kind: 'deny', reason: authorFacingBlock(blocked.reason, blocked.target, blocked.kind) }
     }
     return next()
   })
@@ -483,7 +543,8 @@ export function apply(ctx, rawConfig) {
     }
     if (!findings) return next()
 
-    const text = `写后检查（${path.basename(target)}）：\n${findings}`
+    const text = authorFacingPostWrite(findings, target)
+    if (!text) return next()
     const downstream = await next()
     if (config.blockOnPostWrite) {
       const feedback = [{ type: 'text', text }]

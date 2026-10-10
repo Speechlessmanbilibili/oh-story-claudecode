@@ -24,6 +24,15 @@ Object.freeze(structuredClone({ ...input, role: 'user', id: randomUUID() }))
 
 这样插件既不受 profile 的 `node_modules` 形状影响，也不受 Harness 自身打包进 asar 之后的模块解析规则影响。判定逻辑全部来自 `story_hook_core.js`（与 claude-code / codex / opencode / zcode 各端同一份共享核），插件只做“Harness 事件 → 共享核调用 → Harness 决策”这一层薄适配。
 
+## 拦截文案：人话在前，原文在后
+
+共享核是各端共用的判定层，它的文案面向实现，带 `_tracking-state.json`、`tracking_commit.py`、`schema_version` 这类脚本名与字段名。作者不该读到这些，但模型需要原文里的路径和补救步骤，所以插件在 deny 与写后回灌两处各加了一层文案处理：
+
+- 拦截：按形态映射成一句人话（缺细纲、追踪未建、旧格式、状态卡对不上、上一章事务未提交、上一章有未清的 AI 句式欠账），后面附一行 `原始提示：` 保留共享核原文。认不出的形态按类别兜底，**不吞原文**。
+- 写后检查：只摘掉共享核的说明性横幅（`=== 正文兜底检测（路径）===` 与「轻量确定性网自动复扫……」），逐条命中原样保留——改写命中就等于改判定。
+
+映射表在 `authorFacingBlock()` / `authorFacingPostWrite()`，两个函数都是纯函数，有独立断言。
+
 ## 非写作项目一定静默
 
 Harness 的插件挂在 profile 上，会对**该 profile 的所有会话**加载。所以每个时机都先做门控：解析会话工作目录，向上最多 8 层找项目标记（默认 `.story-deployed`，另外把含 `追踪/` 或 `.active-book` 的目录也算写作项目）。找不到就直接 `next()`，不注入上下文、不拦工具、不产生任何副作用。
