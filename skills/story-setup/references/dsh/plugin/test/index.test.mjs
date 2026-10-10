@@ -6,14 +6,30 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir, homedir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
-import { apply, normalizeConfig, walkToRoot } from '../index.js'
+import { apply, dshHome, normalizeConfig, walkToRoot, writeStatus } from '../index.js'
 
 const HOOKS_DIR = path.resolve(import.meta.dirname, '../../../templates/hooks')
+
+// 状态文件写在 $DSH_HOME 下，测试必须先把 home 指到临时目录，别污染真实的 ~/.dsh。
+const TEST_HOME = mkdtempSync(path.join(tmpdir(), 'oh-story-home-'))
+process.env.DSH_HOME = TEST_HOME
+
+/**
+ * 读插件落的加载状态文件。
+ * @returns {object|null} 状态对象，读不到返回 null。
+ */
+function readStatus() {
+  try {
+    return JSON.parse(readFileSync(path.join(TEST_HOME, 'oh-story', 'plugin-status.json'), 'utf8'))
+  } catch {
+    return null
+  }
+}
 
 /**
  * 造一个桩 context，记录注册的监听器与日志。
@@ -88,9 +104,32 @@ function makeStoryProject(options = {}) {
   return root
 }
 
-test('配置缺 hooksDir 时加载期直接报错', () => {
-  assert.throws(() => normalizeConfig({}), /hooksDir/)
-  assert.throws(() => normalizeConfig({ hooksDir: 'D:/definitely/not/here' }), /story_hook_core/)
+test('缺 hooksDir 时落到默认位置，而不是让插件不激活', () => {
+  const cfg = normalizeConfig({})
+  assert.equal(cfg.hooksDir, path.join(TEST_HOME, 'oh-story', 'hooks'))
+  const explicit = normalizeConfig({ hooksDir: 'D:/somewhere/hooks' })
+  assert.equal(explicit.hooksDir, path.normalize('D:/somewhere/hooks'))
+})
+
+test('共享核加载不了时：不注册监听器，并落一份失败状态', () => {
+  const h = makeHarness()
+  h.setCwd(tmpdir())
+  apply(h.ctx, { hooksDir: path.join(tmpdir(), 'definitely-not-here') })
+  assert.equal(h.listeners.size, 0, '核缺失时不该注册任何监听器')
+  const status = readStatus()
+  assert.equal(status?.ok, false)
+  assert.equal(status?.stage, 'load-core')
+})
+
+test('共享核装好时：注册六个时机，并落一份 ok 状态', () => {
+  const h = makeHarness()
+  apply(h.ctx, { hooksDir: HOOKS_DIR })
+  for (const event of ['agent/created', 'tools/pre-execute', 'tools/post-execute', 'agent/turn-stopping', 'session/event', 'agent/pre-step']) {
+    assert.ok(h.listeners.has(event), `应当注册 ${event}`)
+  }
+  const status = readStatus()
+  assert.equal(status?.ok, true)
+  assert.equal(path.normalize(status.hooksDir), path.normalize(HOOKS_DIR))
 })
 
 test('walkToRoot 能向上找到带标记的项目根', () => {

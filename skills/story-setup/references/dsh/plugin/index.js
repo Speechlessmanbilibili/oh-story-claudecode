@@ -23,16 +23,24 @@
  * @module dsh-oh-story
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 
 /** Cordis 插件元数据。 */
 export const name = 'oh-story'
 
-/** 需要的工作目录服务；缺失时回落到 process.cwd()。 */
-export const inject = ['workingDirectory']
+/**
+ * 不声明任何 inject。
+ *
+ * Cordis 里 `inject` 是激活前置：列进去的服务没就绪，`apply` 根本不会被调用。
+ * 早期版本声明了 `workingDirectory`，一旦该服务名或装载时机跟预期不符，插件就会
+ * 静默地永不激活，而 Harness 默认没有可见日志，这种失败查不出来。
+ * 工作目录改为在事件里惰性取（见 rootFor 的三级回落），拿不到就按非写作项目静默放行。
+ */
+export const inject = []
 
 /** 默认的项目标记文件，与其它宿主的 `.story-deployed` 保持一致。 */
 export const DEFAULT_PROJECT_MARKER = '.story-deployed'
@@ -90,13 +98,11 @@ function contextSource(section, text) {
  */
 export function normalizeConfig(raw) {
   const cfg = raw && typeof raw === 'object' ? raw : {}
-  const hooksDir = typeof cfg.hooksDir === 'string' && cfg.hooksDir ? path.resolve(cfg.hooksDir) : ''
-  if (!hooksDir) {
-    throw new Error('oh-story: 配置缺少 hooksDir（指向部署后的 oh-story hooks 目录）')
-  }
-  if (!existsSync(path.join(hooksDir, 'story_hook_core.js'))) {
-    throw new Error(`oh-story: hooksDir 下找不到 story_hook_core.js：${hooksDir}`)
-  }
+  // hooksDir 不给就用默认位置：$DSH_HOME/oh-story/hooks。装了包但没写 profile 补丁时
+  // 也能落在正确目录上，不用因为少一个字段就让整个插件不激活。
+  const hooksDir = typeof cfg.hooksDir === 'string' && cfg.hooksDir
+    ? path.resolve(cfg.hooksDir)
+    : path.join(dshHome(), 'oh-story', 'hooks')
   const rosterDir = typeof cfg.rosterDir === 'string' && cfg.rosterDir ? cfg.rosterDir : null
   const contextMaxChars = Number.isInteger(cfg.contextMaxChars) && cfg.contextMaxChars > 0
     ? cfg.contextMaxChars
@@ -115,6 +121,40 @@ export function normalizeConfig(raw) {
     steerOnGaps: cfg.steerOnGaps !== false,
     rosterDir,
     maxRootWalk,
+  }
+}
+
+/**
+ * 解析 Harness home：优先 `DSH_HOME`，否则 `~/.dsh`。
+ * @returns {string} home 绝对路径。
+ */
+export function dshHome() {
+  const fromEnv = process.env.DSH_HOME
+  if (typeof fromEnv === 'string' && fromEnv) return path.resolve(fromEnv)
+  return path.join(os.homedir(), '.dsh')
+}
+
+/**
+ * 写一份加载状态文件，供部署验证与排障读取。
+ *
+ * Harness 默认没有可见日志，插件「加载失败」和「加载成功但没命中」在外部看起来
+ * 一模一样。落一份状态文件是最省事的判据：文件在且 `ok: true` 就说明插件真的起来了。
+ *
+ * @param {Record<string, unknown>} status - 状态内容。
+ * @returns {void}
+ */
+export function writeStatus(status) {
+  try {
+    const dir = path.join(dshHome(), 'oh-story')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, 'plugin-status.json'),
+      `${JSON.stringify({ ...status, pid: process.pid, at: new Date().toISOString() }, null, 2)}\n`,
+      'utf8',
+    )
+  } catch (error) {
+    // 状态文件写不了不影响主流程；排障时设 OH_STORY_DEBUG=1 让它抛出来。
+    if (process.env.OH_STORY_DEBUG) throw error
   }
 }
 
@@ -313,13 +353,21 @@ function guardReason(core, exec, root) {
  * @returns {void}
  */
 export function apply(ctx, rawConfig) {
-  const config = normalizeConfig(rawConfig)
+  let config
+  try {
+    config = normalizeConfig(rawConfig)
+  } catch (error) {
+    writeStatus({ ok: false, stage: 'normalizeConfig', error: String(error) })
+    ctx.logger?.warn?.(`oh-story: 配置解析失败，插件不生效：${String(error)}`)
+    return
+  }
   const require_ = createRequire(import.meta.url)
 
   let core
   try {
     core = require_(path.join(config.hooksDir, 'story_hook_core.js'))
   } catch (error) {
+    writeStatus({ ok: false, stage: 'load-core', hooksDir: config.hooksDir, error: String(error) })
     ctx.logger?.warn?.(`oh-story: 共享核加载失败，插件不生效：${String(error)}`)
     return
   }
@@ -332,9 +380,16 @@ export function apply(ctx, rawConfig) {
   const pendingReinject = new Set()
   /** `${sessionId}:${turn}` → 已经 steer 过，避免同一回合反复续写。 */
   const steered = new Set()
+  /** 命中计数的落盘节流：只在第一次命中时写状态。 */
+  let guardHits = 0
+  let firstGuardRecorded = false
 
   /**
    * 解析某次调用所属的写作项目根，带会话级缓存。
+   *
+   * 工作目录三级回落：工作目录服务 → session header 里的 cwd → 进程 cwd。
+   * 三级都拿不到就返回 null，按非写作项目静默放行（见 inject 的说明）。
+   *
    * @param {object|undefined} agent - 会话主体。
    * @param {AbortSignal|undefined} signal - 取消信号。
    * @returns {Promise<string|null>} 项目根或 null。
@@ -348,6 +403,12 @@ export function apply(ctx, rawConfig) {
       cwd = (await ctx.workingDirectory?.ensure?.(agent, signal)) || ''
     } catch {
       cwd = ''
+    }
+    if (!cwd || typeof cwd !== 'string') {
+      const header = agent?.session?.header
+      cwd = (typeof header?.cwd === 'string' && header.cwd)
+        || (typeof header?.workingDirectory === 'string' && header.workingDirectory)
+        || ''
     }
     if (!cwd || typeof cwd !== 'string') cwd = process.cwd()
 
@@ -391,7 +452,18 @@ export function apply(ctx, rawConfig) {
     const root = await rootFor(exec.agent, exec.signal)
     if (!root) return next()
     const reason = guardReason(core, exec, root)
-    if (reason) return { kind: 'deny', reason }
+    if (reason) {
+      // 第一次真拦下来时写一次状态，便于在外部确认插件不只是「起来了」而是「在干活」。
+      guardHits += 1
+      if (!firstGuardRecorded) {
+        firstGuardRecorded = true
+        writeStatus({
+          ok: true, hooksDir: config.hooksDir, guardHits,
+          note: 'first guard hit', tool: String(exec.name || ''), reason,
+        })
+      }
+      return { kind: 'deny', reason }
+    }
     return next()
   })
 
@@ -477,6 +549,9 @@ export function apply(ctx, rawConfig) {
     if (!text) return downstream
     return { ...downstream, messages: [...(downstream.messages ?? []), makeMessage('post-compact', text)] }
   })
+
+  // 全部监听器注册完成才写状态：文件在且 ok:true，就证明插件真的被装载并接上了。
+  writeStatus({ ok: true, hooksDir: config.hooksDir, guardHits: 0 })
 }
 
 export default { name, inject, apply }
