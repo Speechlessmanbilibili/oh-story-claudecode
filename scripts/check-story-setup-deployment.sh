@@ -902,7 +902,7 @@ run_bash_guard() {
   local command_text="$1" ec=0 payload
   payload="$(python3 - "$command_text" <<'PY'
 import json, sys
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}, ensure_ascii=False))
+sys.stdout.buffer.write(json.dumps({"tool_name": "Bash", "tool_input": {"command": sys.argv[1]}}, ensure_ascii=False).encode("utf-8"))
 PY
 )"
   printf '%s' "$payload" \
@@ -955,8 +955,8 @@ if command -v node >/dev/null 2>&1; then
     | CLAUDE_PROJECT_DIR="$guard_root" bash "$guard_root/.claude/hooks/guard-outline-before-prose.sh" 2>&1 >/dev/null || true)"
   printf '%s' "$pad_err" | grep -q '细纲_第008章\.md' || fail "missing-outline block must name the zero-padded outline file: $pad_err"
   var_payload="$(python3 - <<'PY'
-import json
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": 'PROJ=$PWD/book; cat draft.md > "$PROJ/正文/第8章_x.md"'}}, ensure_ascii=False))
+import json, sys
+sys.stdout.buffer.write(json.dumps({"tool_name": "Bash", "tool_input": {"command": 'PROJ=$PWD/book; cat draft.md > "$PROJ/正文/第8章_x.md"'}}, ensure_ascii=False).encode("utf-8"))
 PY
 )"
   var_ec=0
@@ -970,7 +970,7 @@ PY
   mkdir -p "$guard_root/nested/book/正文"
   cwd_payload="$(python3 - "$guard_root/nested" <<'PY'
 import json, sys
-print(json.dumps({"cwd": sys.argv[1], "tool_name": "Bash", "tool_input": {"command": "cat > book/正文/第8章_x.md"}}, ensure_ascii=False))
+sys.stdout.buffer.write(json.dumps({"cwd": sys.argv[1], "tool_name": "Bash", "tool_input": {"command": "cat > book/正文/第8章_x.md"}}, ensure_ascii=False).encode("utf-8"))
 PY
 )"
   cwd_ec=0
@@ -982,8 +982,8 @@ PY
   cp "$guard_root/.claude/hooks/story_hook_core.js" "$guard_root/.claude/hooks/story_hook_core.js.bak"
   printf '%s\n' 'throw new Error("broken core fixture")' > "$guard_root/.claude/hooks/story_hook_core.js"
   broken_payload="$(python3 - <<'PY'
-import json
-print(json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > book/正文/第8章_x.md"}}, ensure_ascii=False))
+import json, sys
+sys.stdout.buffer.write(json.dumps({"tool_name": "Bash", "tool_input": {"command": "cat > book/正文/第8章_x.md"}}, ensure_ascii=False).encode("utf-8"))
 PY
 )"
   broken_ec=0
