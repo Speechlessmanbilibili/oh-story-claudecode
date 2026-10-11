@@ -258,6 +258,35 @@ assert_grep 'ERR_UNSUPPORTED_ESM_URL_SCHEME' "$DEPLOY_DSH" "deploy-dsh.md must w
 assert_grep 'tools/pre-execute' "$DEPLOY_DSH" "deploy-dsh.md must name the harness interception point the guard uses"
 assert_grep 'session/event' "$DEPLOY_DSH" "deploy-dsh.md must document how compaction is handled without a real PreCompact pair"
 assert_grep '不用兼容桥' "$DEPLOY_DSH" "deploy-dsh.md must state DeepSeek Harness does not route through the dialect bridges"
+assert_file "$SKILL_DIR/scripts/generate-dsh-agents.mjs"
+assert_grep 'generate-dsh-agents\.mjs' "$DEPLOY_DSH" "deploy-dsh.md must tell the deployer to generate the dsh playbooks, not copy the templates"
+assert_grep 'generate-dsh-agents\.mjs' "$SKILL_FILE" "story-setup Phase 1 self-check must require the dsh playbook generator"
+
+# 上游剧本写死了别的宿主的路径与调用语法，直接复制会让子代理去错目录找参考文件。
+# 生成器必须真的把这些字面量换掉，并把 dsh 没有的 per-agent 守卫摘掉；只锁措辞不够。
+dsh_agents_fixture="$TMP_DIR/dsh-agents"
+mkdir -p "$dsh_agents_fixture"
+if node "$SKILL_DIR/scripts/generate-dsh-agents.mjs" --target "$dsh_agents_fixture" >"$TMP_DIR/dsh-agents.json" 2>"$TMP_DIR/dsh-agents.err"; then
+  dsh_agent_count="$(find "$dsh_agents_fixture/.oh-story/agents" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+  [ "$dsh_agent_count" = "7" ] || fail "dsh playbook generator must emit 7 agents, got $dsh_agent_count"
+  dsh_rule_count="$(find "$dsh_agents_fixture/.oh-story/rules" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+  [ "$dsh_rule_count" = "4" ] || fail "dsh playbook generator must emit 4 rules, got $dsh_rule_count"
+  for agent in chapter-extractor character-designer consistency-checker narrative-writer story-architect story-explorer story-researcher; do
+    assert_file "$dsh_agents_fixture/.oh-story/agents/$agent.md"
+  done
+  # 产物里不许再有别的宿主的路径、hooks 环境变量或 agent 调用语法。
+  if grep -rlE '\.claude|CLAUDE_PROJECT_DIR|subagent_type' "$dsh_agents_fixture/.oh-story/agents/" >"$TMP_DIR/dsh-agents-leak" 2>/dev/null; then
+    fail "dsh playbook generator left foreign-host path or syntax literals: $(tr '\n' ' ' <"$TMP_DIR/dsh-agents-leak")"
+  fi
+  # chapter-extractor 上游靠 frontmatter 的 per-agent 守卫收窄写入范围，dsh 没有这一层。
+  if grep -q '^hooks:' "$dsh_agents_fixture/.oh-story/agents/chapter-extractor.md"; then
+    fail "dsh playbook generator must strip the per-agent hooks block the harness cannot enforce"
+  fi
+  assert_grep 'DeepSeek Harness 适配说明' "$dsh_agents_fixture/.oh-story/agents/story-architect.md" "dsh playbooks must carry their host adaptation note"
+  assert_grep '\.dsh/skills/story-setup/references/agent-references/' "$dsh_agents_fixture/.oh-story/agents/story-architect.md" "dsh playbooks must resolve agent references against the project-local skill root"
+else
+  fail "dsh playbook generator failed: $(cat "$TMP_DIR/dsh-agents.err")"
+fi
 for other in openclaw reasonix generic zcode opencode codex; do
   assert_no_grep "references/$other/AGENTS\.md\.tmpl" "$DEPLOY_DSH" "deploy-dsh.md must not deploy the $other AGENTS template"
 done

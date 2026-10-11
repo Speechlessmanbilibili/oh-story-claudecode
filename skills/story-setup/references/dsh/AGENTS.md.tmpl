@@ -50,13 +50,21 @@
 
 ## 多角色分工
 
-Harness 没有“按名字 spawn 的自定义 agent”注册表，所以 7 个角色是剧本文件。需要分工时用 `subagent` 工具，把对应剧本全文放在 prompt 开头：
+Harness 没有“按名字 spawn 的自定义 agent”注册表，所以 7 个角色是剧本文件。需要分工时用 `subagent` 工具，prompt 里点名剧本绝对路径并要求子代理**先完整读取它再动手**，不要自己把剧本正文抄进 prompt：
+
+```
+项目目录：{书目录}
+任务包：{任务包路径}
+角色剧本：{项目根}/.oh-story/agents/{角色}.md — 先完整读取它，按它执行
+```
 
 - 拆章、定人设 → `story-architect`、`character-designer`
 - 写正文、去 AI 味 → `narrative-writer`
 - 查事实与伏笔 → `consistency-checker`
 - 查设定、查资料 → `story-explorer`、`story-researcher`
 - 抽章节摘要 → `chapter-extractor`
+
+`.oh-story/agents/` 下的剧本由 `generate-dsh-agents.mjs` 生成：上游模板里写死的宿主路径、per-tool 守卫和调用语法都已按 dsh 改写，文末附有“DeepSeek Harness 适配说明”。不要手改这些文件，改了下次部署会被覆盖；要改就改上游模板。
 
 并行 spawn 时每个子 agent 只领一个角色，产出回主会话统一落盘。
 

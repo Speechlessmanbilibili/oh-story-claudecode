@@ -44,8 +44,7 @@ generic 只往项目里放 `skills/` 和 `AGENTS.md`，没有运行时拦截、�
    这两项都有默认值（`$DSH_HOME/oh-story/hooks` 与 `.oh-story/agents`），所以即使这层补丁没生效，插件也会落在正确目录上。
 5. **铺项目。** 在写作项目根：
    - 合并 `references/dsh/AGENTS.md.tmpl` 到 `<项目>/AGENTS.md`；
-   - 复制 7 个角色剧本到 `<项目>/.oh-story/agents/`；
-   - 复制 4 份规则到 `<项目>/.oh-story/rules/`；
+   - 跑 `node scripts/generate-dsh-agents.mjs --target <项目根>` 铺 7 个角色剧本与 4 份规则到 `<项目>/.oh-story/`。**不要直接复制 `references/templates/agents/`**：上游剧本里写死了别的宿主的 skills 路径、hooks 路径、per-tool 守卫和 `subagent_type` 调用语法，照抄过去子代理会去别的宿主目录找参考文件，找不到就返回缺失事实，整条链白跑。生成器只置换这些宿主字面量、保留方法论正文，并在文末附一段 dsh 适配说明；
    - 复制 13 个 skill 目录到 `<项目>/.dsh/skills/`；
    - 写 `.story-deployed`（字段见 SKILL.md Phase 2 Step 2，`target_cli` 写 `dsh`，`references_dir` 写 `.dsh/skills/story-setup/references/agent-references`）。
 6. **清用户级残留。** 如果作者先前用过 `npx skills add … -g`，`~/.agents/skills/` 下会留一份同名 skill。问作者要不要撤掉：留着的话所有会话的技能目录都会列出这 13 个名字；撤掉只有本项目看得见。撤的时候只删这 13 个目录，别动同目录下其它 skill。
@@ -54,13 +53,13 @@ generic 只往项目里放 `skills/` 和 `AGENTS.md`，没有运行时拦截、�
 
 - `$DSH_HOME/oh-story/hooks/story_hook_core.js` 存在且可解析。
 - profile 的 `node_modules/dsh-oh-story/index.js` 存在；`cordis.patch.yml` 里 `id: oh-story` 的条目存在且 `hooksDir` 指向真实目录。
-- `<项目>/.dsh/skills/` 下 13 个 `SKILL.md` 可读；`<项目>/.oh-story/agents/` 下 7 个剧本齐全。
+- `<项目>/.dsh/skills/` 下 13 个 `SKILL.md` 可读；`<项目>/.oh-story/agents/` 下 7 个剧本齐全，且**不含别的宿主的路径字面量**（`.claude` / `CLAUDE_PROJECT_DIR` / `subagent_type`）：`grep -rlE '\.claude|CLAUDE_PROJECT_DIR|subagent_type' <项目>/.oh-story/agents/` 应当无输出，有输出说明是直接复制模板而不是跑生成器。
 - `<项目>/AGENTS.md` 含 dsh story skill routing sections。
 - 插件自检（不需要起 Harness，可直接跑）：
   ```bash
   cd $DSH_HOME/oh-story/plugin && node --test test/index.test.mjs
   ```
-  10 条断言覆盖「非写作项目完全静默」「缺细纲拦下」「追踪状态缺失拦下」「齐了放行」「写后回灌」「会话开始注入」「默认 hooksDir」「核缺失时不注册且落失败状态」「核装好时注册六个时机且落 ok 状态」，全绿才算铺对。
+  13 条断言覆盖「非写作项目完全静默」「缺细纲拦下」「追踪状态缺失拦下」「齐了放行」「写后回灌」「会话开始注入」「默认 hooksDir」「核缺失时不注册且落失败状态」「核装好时注册六个时机且落 ok 状态」，全绿才算铺对。
 - **重启后确认插件真的起来了**：读 `$DSH_HOME/oh-story/plugin-status.json`。文件在且 `ok: true` 才算装载成功；`ok: false` 会带 `stage`（`normalizeConfig` 配置解析 / `load-core` 共享核加载）与 `error`。第一次真拦下写入时该文件会被更新一次，带 `guardHits` 与拦截原因，用来区分「起来了」和「在干活」。
 - **生效条件**：插件与 profile 依赖是启动期读的，装完要**重启 DSH**；只改 `cordis.patch.yml` 的话由 profile 的 patch 热重载接管。
 
